@@ -2,13 +2,11 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
-	"unicode"
 )
 
 type statistics struct {
@@ -27,66 +25,52 @@ const form = `<html><body><form action="/" method="POST">
 
 const error = `<p class="error">%s</p>`
 
-var pageTop = ""
-var pageBottom = ""
+var pageTop = "Aloha"
+var pageBottom = "Bye-bye"
 
-// Define a root handler for requests to function homePage, and start the webserver combined with error-handling
-func main() {
+func main() { // Define a root handler for requests to function homePage, and start the webserver combined with error-handling
+	http.HandleFunc("/", homePage)
+	if err := http.ListenAndServe(":3000", nil); err != nil {
+		log.Fatal("failed to start server", err)
+	}
+}
 
-	http.HandleFunc("/", homePage)           // Устанавливаем роутер
-	err := http.ListenAndServe(":8080", nil) // устанавливаем порт веб-сервера
+func homePage(writer http.ResponseWriter, request *http.Request) { // Write an HTML header, parse the form, write form to writer and make request for numbers
+	writer.Header().Set("Content-Type", "text/html")
+	err := request.ParseForm() // Must be called before writing response
+	fmt.Fprint(writer, pageTop, form)
 	if err != nil {
-		log.Fatal("ListenAndServe: ", err)
-	}
-
-}
-
-// Write an HTML header, parse the form, write form to writer and make request for numbers
-func homePage(writer http.ResponseWriter, request *http.Request) {
-
-	switch request.Method {
-	case "GET":
-		/* display the form to the user */
-		io.WriteString(writer, form)
-	case "POST":
-		/* handle the form data, note that ParseForm must
-		   be called before we can extract form data with Form */
-
-		numbers, _, _ := processRequest(request)
-		fmt.Fprint(writer, formatStats(getStats(numbers)))
-
-	}
-
-}
-
-// Capture the numbers from the request, and format the data and check for errors
-func processRequest(request *http.Request) ([]float64, string, bool) {
-
-	var stat statistics
-
-	for _, v := range request.FormValue("numbers") {
-		if unicode.IsNumber(v) != true && v != 32 && v != 44 {
-			fmt.Println("Please put numbers with spaces and commas only")
-			return nil, "Please put numbers with spaces and commas only", false
+		fmt.Fprintf(writer, error, err)
+	} else {
+		if numbers, message, ok := processRequest(request); ok {
+			stats := getStats(numbers)
+			fmt.Fprint(writer, formatStats(stats))
+		} else if message != "" {
+			fmt.Fprintf(writer, error, message)
 		}
 	}
+	fmt.Fprint(writer, pageBottom)
+}
 
-	for _, v := range strings.FieldsFunc(request.FormValue("numbers"), Split) {
-		v, _ := strconv.ParseFloat(v, 64)
-		stat.numbers = append(stat.numbers, v)
+func processRequest(request *http.Request) ([]float64, string, bool) { // Capture the numbers from the request, and format the data and check for error
+	var numbers []float64
+	if slice, found := request.Form["numbers"]; found && len(slice) > 0 {
+		text := strings.Replace(slice[0], ",", " ", -1)
+		for _, field := range strings.Fields(text) {
+			if x, err := strconv.ParseFloat(field, 64); err != nil {
+				return numbers, "'" + field + "' is invalid", false
+			} else {
+				numbers = append(numbers, x)
+			}
+		}
 	}
-
-	fmt.Println(stat.numbers)
-
-	return nil, "Results", true
+	if len(numbers) == 0 {
+		return numbers, "", false // no data first time form is shown
+	}
+	return numbers, "", true
 }
 
-func Split(r rune) bool {
-	return r == ' ' || r == ','
-}
-
-// sort the values to get mean and median
-func getStats(numbers []float64) (stats statistics) {
+func getStats(numbers []float64) (stats statistics) { // sort the values to get mean and median
 	stats.numbers = numbers
 	sort.Float64s(stats.numbers)
 	stats.mean = sum(numbers) / float64(len(numbers))
@@ -94,16 +78,14 @@ func getStats(numbers []float64) (stats statistics) {
 	return
 }
 
-// seperate function to calculate the sum for mean
-func sum(numbers []float64) (total float64) {
+func sum(numbers []float64) (total float64) { // seperate function to calculate the sum for mean
 	for _, x := range numbers {
 		total += x
 	}
 	return
 }
 
-// seperate function to calculate the median
-func median(numbers []float64) float64 {
+func median(numbers []float64) float64 { // seperate function to calculate the median
 	middle := len(numbers) / 2
 	result := numbers[middle]
 	if len(numbers)%2 == 0 {
